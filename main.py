@@ -5,6 +5,16 @@ import apiclient.discovery
 from oauth2client.service_account import ServiceAccountCredentials
 
 
+import datetime
+import os.path
+from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+
+
+
+
 def get_list_files(drive):
     mimeType = 'application/vnd.google-apps.spreadsheet'
     response = drive.files().list(q=f"mimeType='{mimeType}'",
@@ -217,7 +227,7 @@ def format_sheet(service, spreadsheetId, sheetId):
 
 
 
-def update_sheet(service, spreadsheetId, room, sheetId):
+def update_sheet(service, spreadsheetId, room, sheetId, colls):
     results = service.spreadsheets().values().batchUpdate(spreadsheetId = spreadsheetId, body = {
     "valueInputOption": "USER_ENTERED", # Данные воспринимаются, как вводимые пользователем (считается значение формул)
     "data": [
@@ -239,15 +249,18 @@ def update_sheet(service, spreadsheetId, room, sheetId):
 
                    ]}
     ]
-}).execute()
+}).execute()   
     format_sheet(service, spreadsheetId, sheetId)
+    update_sheet_data(service, spreadsheetId, room, colls)
 
 
 def get_short_name(full_name):
+    short_name = full_name
     full_name_split = full_name.split()
-    short_name = f'{full_name_split[0]}'
-    short_name += f' {full_name_split[1][0]}.'
-    short_name += f'{full_name_split[1][0]}.'
+    if len(full_name_split) > 2:
+      short_name = f'{full_name_split[0]}'
+      short_name += f' {full_name_split[1][0]}.'
+      short_name += f'{full_name_split[1][0]}. '
     return short_name
 
 def data_conversion(data, branch, room):
@@ -267,7 +280,7 @@ def data_conversion(data, branch, room):
     d_time = []
     for t in time:
         d_time.append({t:[]})
-    print(d_time)
+    # print(d_time)
     for r in data_branch_room:
         r = r[0]
         name = list(r.keys())[0]
@@ -276,96 +289,162 @@ def data_conversion(data, branch, room):
 
 
 
-    #     r = r[0]
-    #     name = list(r.keys())[0]
-    #     short_name = get_short_name(name)
-    #     row = r[name]
-    #     # print(row)
-
-    #     coll = []
-
-    #     for t in time:
-    #         flag = True
-    #         for r in row:
-    #             if t == r.split(':')[0]:
-    #                coll.append(short_name)
-    #                flag = False 
-    #             continue
-    #         if flag:
-    #             coll.append('') 
-    #     week.append(coll)
-    #     # print(coll)
-    
-    # pprint(week)
-
-
-
-
-
-def update_sheet_data(service, spreadsheetId, room, data):
-    colls = data_conversion(data, branch = 'Свободы 18', room = room)
+def update_sheet_data(service, spreadsheetId, room, colls):
     results = service.spreadsheets().values().batchUpdate(spreadsheetId = spreadsheetId, body = {
     "valueInputOption": "USER_ENTERED", # Данные воспринимаются, как вводимые пользователем (считается значение формул)
     "data": [
-        {"range": f"{room}!C2:J20",
+        {"range": f"{room}!C3:J20",
          "majorDimension": "COLUMNS",     # Сначала заполнять строки, затем столбцы
-         "values": [
+         "values": 
                     colls
-                   ]}
+                   }
     ]
 }).execute()
 
 
+def get_coll(day_time):
+  colls = []
+  output = []
+  time_range = [{str(i):[]} for i in range(10,21)]
+  for time in day_time:
+    full_name = list(time.keys())[0]
+    short_name = get_short_name(full_name)
+
+    coll = []
+    for t in time_range:
+      r_in = time[full_name][0].split(':')[0]
+      r_out = time[full_name][-1].split(':')[0]
+      # print(time[full_name][-1])
+      if not time[full_name][-1]:
+        coll.append(' ')
+        continue
+      if (time[full_name][-1].split(':')[1]) == '00':
+        r_out = str(int(r_out) - 1)
+      r = [str(i) for i in range(int(r_in), int(r_out) + 1)]
+      text = '-'.join(r)
+      # print(short_name)
+      # print(text)
+      if list(t.keys())[0] in text:
+
+
+        coll.append(short_name)
+      else:
+        coll.append(' ')  
+    colls.append(coll)
+
+  for i in range(len(time_range)):
+    result = ''
+    for coll in colls:
+      result += coll[i] 
+    output.append(result)
+  return(output)
+
+
+def get_data_cabinet(cabinests):
+  week = [
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+  ]
+  # print(cabinests)
+  for row in cabinests:
+    name = list(row.keys())[0]
+    # print(list(row.keys())[0])
+    j = 0
+    for i in range(14):
+      if row[name][i] and i%2 == 0:
+        # print(name, row[name][i:i+2])
+        week[int(j)].append({name:row[name][i:i+2]})
+      j += 0.5
+  return week
 
 
 
-def main(drive, service, files, data):
-    name = 'Svobody 18'
-    spreadsheet_id = '1QUZCgmCjPmz04LFXBSCE8ELm2jsyFqoWPGoU7BDSdec'
-    room = 'Кабинет №4' # TODO 
+def get_data_branch(branch):
+  cabinests = {}
+  if branch:
+    for row in branch:
+      if list(row.keys())[0] not in cabinests:
+        cabinet = list(row.keys())[0]
+        cabinests[cabinet] = []
+
+    for row in branch:
+
+      cabinet = list(row.keys())[0]
+      cabinests[cabinet].append(row[cabinet])
+    return cabinests  
+  else:
+    print('Нехватка данных')  
+
+
+def get_data_branches(service):
+    sheet = service.spreadsheets()
+    result = sheet.values().get(spreadsheetId=GetSheets_id,
+                                range="K2:AB4000").execute()
+    values = result.get('values', [])
+    branches = {}
+    for row in values:
+      if row[0] not in branches:
+        branches[row[0]] = []
+    for row in values:
+      branches[row[0]].append({row[1]:{row[-1]:row[2:-1]}})
+    return branches
+
+
+def check_new(service, spreadsheet_id, room):
     is_exist = False
-
     spreadsheet = service.spreadsheets().get(spreadsheetId = spreadsheet_id).execute()
     sheetList = spreadsheet.get('sheets')
     for sheet in sheetList:
-        # print(sheet['properties']['title'])
         if room == sheet['properties']['title']:
             is_exist = True
             sheetId = sheet['properties']['sheetId']
 
     if not is_exist:
         create_sheet(service, spreadsheet_id, room)
-    update_sheet(service, spreadsheet_id, room, sheetId)
-
-    update_sheet_data(service, spreadsheet_id, room, data)
+    return sheetId
 
 
+def main(drive, service, sheets):
+    branches = get_data_branches(service)
+    for sheet in sheets:
+      name = sheet['name']
+      print(f'Начинаю заполнять таблицу {name}')
+      spreadsheet_id = sheet['id']
+      cabinests = get_data_branch(branches.get(name, None))
+      if not cabinests:
+        continue
+      for cabinet in cabinests:
+        week = get_data_cabinet(cabinests[cabinet])
+        colls = []
+        for day in week:
+          colls.append(get_coll(day))
+        room = f'Кабинет №{cabinet}'
+        print(room)
+        sheetId = check_new(service, spreadsheet_id, room)
+        update_sheet(service, spreadsheet_id, room, sheetId, colls)
+      return
 
 
-# def get_data(service):
-#     sheet = service.spreadsheets()
-#     result = sheet.values().get(spreadsheetId=GetSheets_id,
-#                                 range="K2:AB4000").execute()
-#     values = result.get('values', [])
-#     branches = {}
-#     for row in values:
-#         branches[(row[0])] = {}
-#     for row in values:
-#         branches[(row[0])].update({row[1]:{row[-1]:[row[2:-2]]}})
-#     return branches
+    
+    
+      
 
 
-def get_data(service):
-    sheet = service.spreadsheets()
-    result = sheet.values().get(spreadsheetId=GetSheets_id,
-                                range="K2:AB4000").execute()
-    values = result.get('values', [])
-    branches = []
-    for row in values:
-        branch = {row[1]:[{row[-1]:row[2:-2]}]}
-        branches.append({row[0]:branch})
+     # TODO 
+    
 
-    return branches
+    
+
+    
+
+
+
+
 
 CREDENTIALS_FILE = 'key.json'
 GetSheets_id = '1Bu8Hh2jJTXhxtTEGsrePacX4LoQ90kvGXl9tMQ0EO6c'
@@ -373,20 +452,21 @@ GetSheets_id = '1Bu8Hh2jJTXhxtTEGsrePacX4LoQ90kvGXl9tMQ0EO6c'
 credentials = ServiceAccountCredentials.from_json_keyfile_name(
     CREDENTIALS_FILE,
     ['https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive'])
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/calendar'  ])
 httpAuth = credentials.authorize(httplib2.Http())
 service = apiclient.discovery.build('sheets', 'v4', http = httpAuth)
 drive = apiclient.discovery.build('drive', 'v3', credentials=credentials)
+calendar = apiclient.discovery.build('calendar', 'v3', http=httpAuth)
 
-
-files = [
+sheets = [
         {
         'id': '1cQUGcPtVwdJbd2ntUSs8n2vyLNnqpl_IonVGX4Xlx64', 
-        'name': 'Stroginsky 7k3'
+        'name': 'Строгинский бульвар 7к3'
     }, 
         {
         'id': '1usO6Gdaa9Pv1XewiZvddrbMaId4kHDNYLQl53yBcwgY', 
-        'name': 'Stroginsky 17k2'
+        'name': 'Строгинский бульвар 17к2'
     }, 
         {
         'id': '1QUZCgmCjPmz04LFXBSCE8ELm2jsyFqoWPGoU7BDSdec', 
@@ -395,8 +475,5 @@ files = [
 ]
 
 
-# get_data(service)
-
-data = get_data(service)
-
-main(drive, service, files, data)
+# pprint(branches)
+main(drive, service, sheets)
